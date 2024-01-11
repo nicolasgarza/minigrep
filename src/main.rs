@@ -29,7 +29,7 @@ fn main() {
             .long("line-numbers")
             .action(ArgAction::SetTrue)
             .help("prefix matches with their line numbers"))
-        .arg(Arg::new("recursive-search")
+        .arg(Arg::new("recursive_search")
             .short('r')
             .long("recursive")
             .action(ArgAction::SetTrue)
