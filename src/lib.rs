@@ -5,37 +5,16 @@ pub struct Config {
     pub query: String,
     pub file_path: String,
     pub ignore_case: bool,
-}
-
-impl Config {
-    pub fn build(
-        mut args: impl Iterator<Item = String>,
-    ) -> Result<Config, &'static str> {
-
-        let query = match args.next() {
-            Some(arg) => arg,
-            None => return Err("Didn't get a query string"),
-        };
-
-        let file_path = match args.next() {
-            Some(arg) => arg,
-            None => return Err("Didn't get a file path"),
-        };
-
-        let flags: Vec<String> = args.collect();
-
-        let ignore_case = flags.contains(&String::from("-i"));
-
-        Ok(Config {
-            query,
-            file_path,
-            ignore_case,
-        })
-    }
+    pub invert: bool,
+    pub line_number: bool,
+    pub recursive_search: bool,
 }
 
 pub fn run_grep(config: Config) -> Result<(), Box<dyn Error>> {
-    let contents = fs::read_to_string(config.file_path)?;
+    let contents = match fs::read_to_string(config.file_path){
+        Ok(file) => file,
+        Err(e) => return Err(Box::new(e)),
+    };
 
     let results = if config.ignore_case {
         search_case_insensitive(&config.query, &contents)
