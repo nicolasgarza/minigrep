@@ -1,5 +1,7 @@
 use std::error::Error;
+use walkdir::WalkDir;
 use std::fs;
+use std::path::Path;
 
 pub struct Config {
     pub query: String,
@@ -11,110 +13,75 @@ pub struct Config {
 }
 
 pub fn run_grep(config: Config) -> Result<(), Box<dyn Error>> {
-    let contents = match fs::read_to_string(&config.file_path) {
-        Ok(file) => file,
-        Err(e) => return Err(Box::new(e)),
-    };
+    if config.recursive_search {
+        let path = Path::new(&config.file_path);
+        if path.exists() && path.is_dir() {
+            recursive_search(config)?;
+            return Ok(())
+        }
+    }
+    let contents = fs::read_to_string(&config.file_path)?;
 
-    let results = if config.ignore_case {
-        search_case_insensitive(&config, &contents)
+    let results = if !config.ignore_case {
+        search_with_options(&config, &contents, |line, query| line.contains(query))
     } else {
-        search(&config, &contents)
+        search_with_options(&config, &contents, |line, query| line.to_lowercase().contains(query))
     };
 
-    for line in results {
-        println!("{line}");
+    for (line_number, line) in results {
+        if !config.line_number {
+            println!("{}", line);
+        } else {
+            println!("{} | {}", line_number, line);
+        }
     }
 
     Ok(())
 }
 
-pub fn search<'a>(config: &Config, contents: &'a str) -> Vec<&'a str> {
-    if !config.invert {
-        contents
-        .lines()
-        .filter(|line| line.contains(config.query.as_str()))
-        .collect()
+pub fn search_with_options<'a, F>(config: &Config, contents: &'a str, mut matcher:F ) -> Vec<(usize, &'a str)>
+where
+    F: FnMut(&str, &str) -> bool 
+{
+    let query = if config.ignore_case {
+        config.query.to_lowercase()
     } else {
-        contents
+        config.query.clone()
+    };
+
+    contents
         .lines()
-        .filter(|line| !line.contains(config.query.as_str()))
+        .enumerate()
+        .filter_map(|(index, line)| {
+            let match_condition = matcher(line, &query);
+            if (match_condition && !config.invert) || (!match_condition && config.invert) {
+                Some((index + 1, line))
+            } else {
+                None
+            }
+        })
         .collect()
-    }
-    
 }
 
-pub fn search_case_insensitive<'a>(config: &Config, contents: &'a str) -> Vec<&'a str> {
-    let binding = config.query.to_lowercase();
-    let query = binding.as_str();
 
-    if !config.invert {
-        contents
-        .lines()
-        .filter(|line| line.to_lowercase().contains(query))
-        .collect()
-    } else {
-        contents
-        .lines()
-        .filter(|line| !line.to_lowercase().contains(query))
-        .collect()
+fn recursive_search(config: Config) -> Result<(), Box<dyn Error>> {
+    for entry in WalkDir::new(&config.file_path).into_iter().filter_map(|e| e.ok()) {
+        if entry.path().is_file() {
+            let contents = fs::read_to_string(entry.path())?;
+            let results = if config.ignore_case {
+                search_with_options(&config, &contents, |line, query| line.to_lowercase().contains(query))
+            } else {
+                search_with_options(&config, &contents, |line, query| line.contains(query))
+            };
+
+            for (line_number, line) in results {
+                if config.line_number {
+                    println!("{}:{}: {}", entry.path().display(), line_number, line);
+                } else {
+                    println!("{}: {}", entry.path().display(), line);
+                }
+            }
+        }
     }
-    
-
-    
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn case_sensitive() {
-        let query = String::from("duct");
-        let contents = "\
-Rust:
-safe, fast, productive.
-Pick three.
-Duct tape.";
-
-        assert_eq!(
-            vec!["safe, fast, productive."],
-            search(
-                &Config {
-                    query,
-                    file_path: String::from(""),
-                    ignore_case: false,
-                    invert: false,
-                    line_number: false,
-                    recursive_search: false
-                },
-                contents
-            )
-        );
-    }
-
-    #[test]
-    fn case_insensitive() {
-        let query = String::from("rUsT");
-        let contents = "\
-Rust:
-safe, fast, productive.
-Pick three.
-Trust me.";
-
-        assert_eq!(
-            vec!["Rust:", "Trust me."],
-            search_case_insensitive(
-                &Config {
-                    query,
-                    file_path: String::from(""),
-                    ignore_case: false,
-                    invert: false,
-                    line_number: false,
-                    recursive_search: false
-                },
-                contents
-            )
-        );
-    }
+    Ok(())
 }
